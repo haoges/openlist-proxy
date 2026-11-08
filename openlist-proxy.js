@@ -190,41 +190,52 @@ async function handleDownload(request, config, redirectDepth = 0) {
   if (redirectDepth > config.maxRedirects) return jsonResponse({ code: 508, message: "Too many redirects" }, 508, applyCors(new Headers(), origin));
   const downloadHeaders = buildDownloadHeaders(request, linkResult.data.header);
   let downloadResponse;
-  try {
-    downloadResponse = await fetchWithTimeout(downloadUrl.toString(), {
-      method: request.method, headers: downloadHeaders, redirect: "manual",
-    }, config.timeoutMs);
-  } catch (error) {
-    return jsonResponse({ code: 502, message: error?.name === "AbortError" ? "Download source timeout" : "Unable to connect to download source" }, 502, applyCors(new Headers(), origin));
+  let currentDownloadUrl = downloadUrl;
+
+  // Follow redirects explicitly so the redirect limit is enforced on every hop.
+  for (let hop = 0; hop <= config.maxRedirects; hop++) {
+    try {
+      downloadResponse = await fetchWithTimeout(currentDownloadUrl.toString(), {
+        method: request.method,
+        headers: downloadHeaders,
+        redirect: "manual",
+      }, config.timeoutMs);
+    } catch (error) {
+      const message = error?.name === "AbortError" ? "Download source timeout" : "Unable to connect to download source";
+      return jsonResponse({ code: 502, message }, 502, applyCors(new Headers(), origin));
+    }
+
+    if (downloadResponse.status < 300 || downloadResponse.status >= 400) break;
+    const location = downloadResponse.headers.get("Location");
+    if (!location) break;
+
+    let nextUrl;
+    try { nextUrl = new URL(location, currentDownloadUrl); }
+    catch { return jsonResponse({ code: 502, message: "Invalid redirect URL" }, 502, applyCors(new Headers(), origin)); }
+
+    if (!["http:", "https:"].includes(nextUrl.protocol)) {
+      return jsonResponse({ code: 502, message: "Unsupported redirect protocol" }, 502, applyCors(new Headers(), origin));
+    }
+
+    if (nextUrl.origin === config.workerOrigin) {
+      return handleDownload(new Request(nextUrl.toString(), request), config, redirectDepth + 1);
+    }
+
+    if (hop >= config.maxRedirects) {
+      return jsonResponse({ code: 508, message: "Too many redirects" }, 508, applyCors(new Headers(), origin));
+    }
+
+    // Do not forward provider credentials across an origin boundary.
+    if (nextUrl.origin !== currentDownloadUrl.origin) {
+      downloadHeaders.delete("Authorization");
+      downloadHeaders.delete("Cookie");
+      downloadHeaders.delete("Proxy-Authorization");
+    }
+    currentDownloadUrl = nextUrl;
   }
 
-  if (downloadResponse.status >= 300 && downloadResponse.status < 400) {
-    const location = downloadResponse.headers.get("Location");
-    if (location) {
-      let nextUrl;
-      try { nextUrl = new URL(location, downloadUrl); }
-      catch { return jsonResponse({ code: 502, message: "Invalid redirect URL" }, 502, applyCors(new Headers(), origin)); }
-      if (!["http:", "https:"].includes(nextUrl.protocol)) {
-        return jsonResponse({ code: 502, message: "Unsupported redirect protocol" }, 502, applyCors(new Headers(), origin));
-      }
-      if (nextUrl.origin === config.workerOrigin) {
-        if (redirectDepth >= config.maxRedirects) return jsonResponse({ code: 508, message: "Too many redirects" }, 508, applyCors(new Headers(), origin));
-        return handleDownload(new Request(nextUrl.toString(), request), config, redirectDepth + 1);
-      }
-      if (nextUrl.origin !== downloadUrl.origin) {
-        downloadHeaders.delete("Authorization");
-        downloadHeaders.delete("Cookie");
-        downloadHeaders.delete("Proxy-Authorization");
-      }
-      if (redirectDepth >= config.maxRedirects) return jsonResponse({ code: 508, message: "Too many redirects" }, 508, applyCors(new Headers(), origin));
-      try {
-        downloadResponse = await fetchWithTimeout(nextUrl.toString(), {
-          method: request.method, headers: downloadHeaders, redirect: "follow",
-        }, config.timeoutMs);
-      } catch {
-        return jsonResponse({ code: 502, message: "Redirect target request failed" }, 502, applyCors(new Headers(), origin));
-      }
-    }
+  if (!downloadResponse) {
+    return jsonResponse({ code: 502, message: "Download source returned no response" }, 502, applyCors(new Headers(), origin));
   }
 
   const responseHeaders = new Headers(downloadResponse.headers);
