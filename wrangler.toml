@@ -1,0 +1,4 @@
+name = "haoges-openlist-proxy"
+main = "openlist-proxy.js"
+compatibility_date = "2026-11-08"
+workers_dev = true
