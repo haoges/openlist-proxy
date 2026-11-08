@@ -96,7 +96,7 @@ async function verifySignature(path, sign, token) {
     const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(token),
       { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
     const valid = await crypto.subtle.verify("HMAC", key, base64UrlToBytes(signatureText),
-      new TextEncoder().encode(\`${path}:${expire}\`));
+      new TextEncoder().encode(`${path}:${expire}`));
     return valid ? "" : "sign mismatch";
   } catch {
     return "signature invalid";
@@ -161,7 +161,7 @@ async function handleDownload(request, config, redirectDepth = 0) {
 
   let apiResponse;
   try {
-    apiResponse = await fetchWithTimeout(\`${config.address}/api/fs/link\`, {
+    apiResponse = await fetchWithTimeout(`${config.address}/api/fs/link`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: config.token },
       body: JSON.stringify({ path }),
