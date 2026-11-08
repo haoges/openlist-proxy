@@ -1,5 +1,7 @@
 /**
  * OpenList Proxy - Cloudflare Workers + EdgeOne Makers
+ * Modified by haoges on 2026-11-08; based on OpenListTeam/OpenList-Proxy.
+ * This program is free software under GNU GPL v3. See LICENSE.
  *
  * Required environment: ADDRESS, TOKEN (TOKEN should be a secret).
  * Optional: WORKER_ADDRESS, DISABLE_SIGN, CORS_ORIGINS,
